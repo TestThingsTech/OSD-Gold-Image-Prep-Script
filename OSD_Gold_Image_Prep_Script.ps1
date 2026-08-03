@@ -2607,6 +2607,8 @@ if ($sysprepgo -match '^[Yy]$') {
         Cleanup-ImagePrepArtifacts
     }
 
+    Remove-PrepLauncherArtifacts
+
     Start-Sleep -Seconds 2
     Invoke-FinalSysprep
 
