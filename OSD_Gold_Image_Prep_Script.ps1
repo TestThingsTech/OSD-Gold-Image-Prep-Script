@@ -2296,6 +2296,35 @@ $entraPpkgCommand
     $unattendXml | Set-Content -Path $unattend -Encoding UTF8
 }
 
+
+function Remove-PrepLauncherArtifacts {
+    $launcherRoot = if ($PSScriptRoot) {
+        $PSScriptRoot
+    } elseif ($MyInvocation.MyCommand.Path) {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        (Get-Location).Path
+    }
+
+    $artifacts = @(
+        (Join-Path -Path $launcherRoot -ChildPath 'OSD_Gold_Image_Prep_Launcher.ps1'),
+        (Join-Path -Path $launcherRoot -ChildPath 'OSD_Gold_Image_Prep_Script.ps1')
+    )
+
+    foreach ($artifact in $artifacts) {
+        try {
+            if (Test-Path -LiteralPath $artifact) {
+                Remove-Item -LiteralPath $artifact -Force -ErrorAction Stop
+                Logwrite ("Removed launcher artifact before Sysprep: {0}" -f $artifact)
+            }
+        }
+        catch {
+            Logwrite ("WARNING: Could not remove launcher artifact {0}: {1}" -f $artifact, $_.Exception.Message)
+            Write-Host ("WARNING: Could not remove {0}" -f $artifact) -ForegroundColor Yellow
+        }
+    }
+}
+
 function Invoke-FinalSysprep {
     $unattend = "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\unattend.xml"
     $sysprep  = "C:\Windows\System32\Sysprep\Sysprep.exe"
