@@ -310,7 +310,8 @@ function Stage-EntraProvisioningPackage {
     }
 
     Copy-Item -Path $SourcePath -Destination $DestinationPath -Force
-    Logwrite ("Staged Entra ID provisioning package from {0} to {1}" -f $SourcePath, $DestinationPath)
+    Remove-Item -Path $SourcePath -Force -ErrorAction SilentlyContinue
+    Logwrite ("Staged Entra ID provisioning package from {0} to {1} and removed source file." -f $SourcePath, $DestinationPath)
 
     return $DestinationPath
 }
@@ -2174,18 +2175,47 @@ function cloudbaseinit_copy_wrapper {
 function Write-UnattendXml {
     param(
         [string]$TimeZone = "UTC",
-        [string]$EntraPpkgPath = ""
+        [string]$EntraPpkgPath = "",
+        [string]$EntraPpkgSourcePath = ""
     )
 
     $unattend = "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\unattend.xml"
+    $unattendDir = Split-Path -Path $unattend -Parent
 
     $entraPpkgCommand = ""
     if (-not [string]::IsNullOrWhiteSpace($EntraPpkgPath)) {
-        $EntraPpkgPath = $EntraPpkgPath.Replace("'", "''")
+        # Escape single quotes for the generated helper script
+        $entraPpkgPathLiteral = $EntraPpkgPath.Replace("'", "''")
+        $helperScriptLiteral = (Join-Path $unattendDir "Install-EntraPpkg.ps1").Replace("'", "''")
+        $unattendLiteral = $unattend.Replace("'", "''")
+
+        # Write a short helper script so the unattend Path stays well under the limit
+        $helperScript = Join-Path $unattendDir "Install-EntraPpkg.ps1"
+        $helperScriptContent = @'
+param()
+Start-Sleep -Seconds 10
+$pkg = '__PKG__'
+$helperScriptPath = '__HELPER__'
+$unattendPath = '__UNATTEND__'
+try {
+    Install-ProvisioningPackage -PackagePath $pkg -ForceInstall -QuietInstall
+} finally {
+    Remove-Item -Path $pkg -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $helperScriptPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $unattendPath -Force -ErrorAction SilentlyContinue
+}
+'@
+        $helperScriptContent = $helperScriptContent.Replace('__PKG__', $entraPpkgPathLiteral).Replace('__HELPER__', $helperScriptLiteral).Replace('__UNATTEND__', $unattendLiteral)
+
+        New-Item -ItemType Directory -Path $unattendDir -Force | Out-Null
+        Set-Content -Path $helperScript -Value $helperScriptContent -Encoding UTF8
+
+        $helperScriptForXml = [System.Security.SecurityElement]::Escape($helperScript)
+
         $entraPpkgCommand = @"
         <RunSynchronousCommand wcm:action="add">
           <Order>4</Order>
-          <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 10; Install-ProvisioningPackage -PackagePath '$EntraPpkgPath' -ForceInstall -QuietInstall; Remove-Item -Path '$EntraPpkgPath' -Force -ErrorAction SilentlyContinue"</Path>
+          <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$helperScriptForXml"</Path>
           <Description>Install Entra ID PPKG</Description>
           <WillReboot>Never</WillReboot>
         </RunSynchronousCommand>
@@ -2263,20 +2293,7 @@ $entraPpkgCommand
 </unattend>
 "@
 
-    if (-not (Test-Path $unattend)) {
-        Write-Host "Unattend file not found at expected path. Writing embedded unattend.xml..." -ForegroundColor Cyan
-    } else {
-        Write-Host "Unattend file exists. Rewriting with merged configuration..." -ForegroundColor Yellow
-    }
-
-    $unattendDir = Split-Path -Path $unattend -Parent
-    if (-not (Test-Path $unattendDir)) {
-        New-Item -ItemType Directory -Path $unattendDir -Force | Out-Null
-    }
-
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($unattend, $unattendXml, $utf8NoBom)
-    Logwrite ("Wrote unattend.xml with timezone {0}" -f $TimeZone)
+    $unattendXml | Set-Content -Path $unattend -Encoding UTF8
 }
 
 function Invoke-FinalSysprep {
@@ -2332,6 +2349,7 @@ do {
 $freeFormTags = $null
 $finalTimeZone = $null
 $entraPpkgPath = $null
+$entraPpkgSourcePath = $null
 
 if ($imageMode -eq '2') {
     $pwsh7Path = "C:\Program Files\PowerShell\7\pwsh.exe"
@@ -2504,7 +2522,8 @@ if ($imageMode -eq '2') {
 }
 elseif ($imageMode -eq '3') {
     Write-Host ""
-    $entraPpkgPath = Stage-EntraProvisioningPackage
+    $entraPpkgSourcePath = Get-EntraProvisioningPackageSourcePath
+    $entraPpkgPath = Stage-EntraProvisioningPackage -SourcePath $entraPpkgSourcePath
     $finalTimeZone = input_timezone
     Logwrite ("Entra ID join selected. Using staged provisioning package at {0}." -f $entraPpkgPath)
 }
@@ -2514,7 +2533,7 @@ else {
 
 }
 
-Write-UnattendXml -TimeZone $finalTimeZone -EntraPpkgPath $entraPpkgPath
+Write-UnattendXml -TimeZone $finalTimeZone -EntraPpkgPath $entraPpkgPath -EntraPpkgSourcePath $entraPpkgSourcePath
 
 Invoke-OptionalDismCleanup
 
