@@ -2297,8 +2297,8 @@ $entraPpkgCommand
 }
 
 
-function Remove-PrepLauncherArtifacts {
-    $launcherRoot = if ($PSScriptRoot) {
+function Remove-CachedPrepScript {
+    $scriptRoot = if ($PSScriptRoot) {
         $PSScriptRoot
     } elseif ($MyInvocation.MyCommand.Path) {
         Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -2306,22 +2306,17 @@ function Remove-PrepLauncherArtifacts {
         (Get-Location).Path
     }
 
-    $artifacts = @(
-        (Join-Path -Path $launcherRoot -ChildPath 'OSD_Gold_Image_Prep_Launcher.ps1'),
-        (Join-Path -Path $launcherRoot -ChildPath 'OSD_Gold_Image_Prep_Script.ps1')
-    )
+    $cachedScript = Join-Path -Path $scriptRoot -ChildPath 'OSD_Gold_Image_Prep_Script.ps1'
 
-    foreach ($artifact in $artifacts) {
-        try {
-            if (Test-Path -LiteralPath $artifact) {
-                Remove-Item -LiteralPath $artifact -Force -ErrorAction Stop
-                Logwrite ("Removed launcher artifact before Sysprep: {0}" -f $artifact)
-            }
+    try {
+        if (Test-Path -LiteralPath $cachedScript) {
+            Remove-Item -LiteralPath $cachedScript -Force -ErrorAction Stop
+            Logwrite ("Removed cached prep script before Sysprep: {0}" -f $cachedScript)
         }
-        catch {
-            Logwrite ("WARNING: Could not remove launcher artifact {0}: {1}" -f $artifact, $_.Exception.Message)
-            Write-Host ("WARNING: Could not remove {0}" -f $artifact) -ForegroundColor Yellow
-        }
+    }
+    catch {
+        Logwrite ("WARNING: Could not remove cached prep script {0}: {1}" -f $cachedScript, $_.Exception.Message)
+        Write-Host ("WARNING: Could not remove {0}" -f $cachedScript) -ForegroundColor Yellow
     }
 }
 
@@ -2607,7 +2602,7 @@ if ($sysprepgo -match '^[Yy]$') {
         Cleanup-ImagePrepArtifacts
     }
 
-    Remove-PrepLauncherArtifacts
+    Remove-CachedPrepScript
 
     Start-Sleep -Seconds 2
     Invoke-FinalSysprep
